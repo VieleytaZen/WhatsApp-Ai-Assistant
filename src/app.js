@@ -8,13 +8,16 @@ const client = new Client({
         dataPath: './.wwebjs_auth'
     }),
     puppeteer: {
-        headless: true, // Set ke false kalau mau lihat browsernya terbuka
-        // Jalur khusus untuk Chrome Dev kamu
-        executablePath: 'C:\\Program Files\\Google\\Chrome Dev\\Application\\chrome.exe',
+        headless: true, // WAJIB true di server/cloud
+        // HAPUS executablePath atau ganti jadi ini:
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage'
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
         ]
     }
 });
