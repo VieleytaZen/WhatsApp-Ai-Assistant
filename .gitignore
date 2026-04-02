@@ -1,0 +1,16 @@
+# Dependency
+node_modules/
+package-lock.json
+
+# Session WhatsApp (Rahasia!)
+.wwebjs_auth/
+.wwebjs_cache/
+sessions/
+
+# API Key & Config (Sangat Rahasia!)
+.env
+*.log
+
+# System files
+.DS_Store
+Thumbs.db
