@@ -1,67 +1,112 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 require('dotenv').config();
+
+// IMPORT: Mengambil konfigurasi dan layanan AI
+const CONFIG = require('./config/config');
 const { generateAIResponse } = require('./services/aiService');
 
-// Penyimpanan sementara untuk melacak chat manual (dalam RAM)
-// Format: { 'nomor_hp': timestamp }
+// Penyimpanan RAM sementara
 const lastUserInteraction = {}; 
-const COOLDOWN_AI = 5 * 60 * 1000; // 5 menit (dalam milidetik)
+const aiDisabledStatus = {}; // Menyimpan status ON/OFF per nomor
 
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
     puppeteer: {
         headless: true,
         args: [
-            '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-            '--single-process', '--disable-gpu', '--no-zygote'
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage',
+            '--single-process', // Hemat RAM untuk Pterodactyl
+            '--disable-gpu', 
+            '--no-cache'
         ],
     }
 });
 
-// --- BAGIAN BARU: PANTAU CHAT MANUAL KAMU ---
+// EVENT: Generate QR Code
+client.on('qr', (qr) => {
+    console.log('\n--- SCAN QR CODE ---');
+    qrcode.generate(qr, { small: true });
+});
+
+// EVENT: Bot Siap
+client.on('ready', () => {
+    console.log('-------------------------------------------');
+    console.log('✓ VIEL SERVICE BOT AKTIF & SIAP MELAYANI!');
+    console.log('-------------------------------------------');
+});
+
+// EVENT: Pantau chat manual kamu (untuk fitur Cooldown)
 client.on('message_create', async (msg) => {
-    // Jika pesan dikirim oleh KAMU sendiri (dari HP)
     if (msg.fromMe) {
-        // Catat waktu terakhir kamu membalas chat ke nomor tujuan
         lastUserInteraction[msg.to] = Date.now();
-        // console.log(`[System] Kamu sedang chat manual dengan ${msg.to}. AI diistirahatkan.`);
     }
 });
 
+// EVENT: Menangani Pesan Masuk
 client.on('message', async (msg) => {
     if (msg.isStatus || msg.type !== 'chat') return;
 
-    const chat = await msg.getChat();
     const pesanUser = msg.body ? msg.body.toLowerCase().trim() : '';
 
+    // --- 1. FITUR COMMANDS (CEK ID & SWITCH) ---
+    
+    // Command untuk cek ID (LID/JID)
+    if (pesanUser === '.myid') {
+        return msg.reply(`*ID WhatsApp Kamu:*\n\n\`${msg.from}\``);
+    }
+
+    // Command mematikan AI di chat tertentu
+    if (pesanUser === '.aioff') {
+        aiDisabledStatus[msg.from] = true;
+        return msg.reply('📴 *AI Dinonaktifkan.* Chat ini sekarang dalam mode manual.');
+    }
+
+    // Command mengaktifkan kembali AI
+    if (pesanUser === '.aion') {
+        delete aiDisabledStatus[msg.from];
+        return msg.reply('✅ *AI Diaktifkan.* Viel Service Bot kembali asistenmu!');
+    }
+
+    // --- 2. LOGIKA FILTER & ROLE ---
+
+    const chat = await msg.getChat();
+
     if (!chat.isGroup) {
-        
-        // --- LOGIKA CEK APAKAH KAMU LAGI DI TEMPAT (LAGI CHAT) ---
+        // Cek apakah AI sedang dimatikan manual
+        if (aiDisabledStatus[msg.from]) return;
+
+        // Cek apakah kamu sedang aktif chat manual (Cooldown)
         const lastManualChat = lastUserInteraction[msg.from] || 0;
         const waktuBerlalu = Date.now() - lastManualChat;
-
-        if (waktuBerlalu < COOLDOWN_AI) {
-            // Jika kamu baru chat kurang dari 5 menit lalu, AI tidak menyahut
-            console.log(`[Silent] AI diam karena kamu sedang aktif chat dengan ${msg.from}`);
+        if (waktuBerlalu < CONFIG.COOLDOWN_AI) {
+            console.log(`[Silent] AI diam karena owner aktif di: ${msg.from}`);
             return; 
         }
+
+        // Cek Role (Marketing vs Customer)
+        const isMarketing = CONFIG.TEAM_MARKETING.includes(msg.from);
+        const userRole = isMarketing ? 'marketing' : 'customer';
 
         if (pesanUser.length < 2) return;
         if (pesanUser === 'ping') return msg.reply('Pong! Viel Service Bot aktif.');
 
         try {
-            console.log(`[AI Response] Membalas ${msg.from}`);
+            console.log(`[${userRole.toUpperCase()}] Memproses pesan dari ${msg.from}`);
+            
             await chat.sendSeen(); 
             await chat.sendStateTyping();
             
-            const aiResponse = await generateAIResponse(msg.from, msg.body);
+            // Panggil AI dengan parameter Role yang sudah dideteksi
+            const aiResponse = await generateAIResponse(msg.from, msg.body, userRole);
             
             await msg.reply(aiResponse);
             await chat.clearState();
             
         } catch (error) {
-            console.error("Error:", error.message);
+            console.error("Error Logika App:", error.message);
             await chat.clearState();
         }
     }
